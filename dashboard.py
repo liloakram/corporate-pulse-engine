@@ -10,6 +10,8 @@ st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
 # Initialize Session State
 if 'analyzed_ticker' not in st.session_state:
     st.session_state['analyzed_ticker'] = None
+if 'latest_live_data' not in st.session_state:
+    st.session_state['latest_live_data'] = None
 
 # --- SIDEBAR: METHODOLOGY ONLY ---
 with st.sidebar:
@@ -21,7 +23,7 @@ with st.sidebar:
     * **<20:** Undervalued
     """)
     st.divider()
-    st.caption("v3.1 | Portfolio Edition")
+    st.caption("v3.2 | Live Priority Mode")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -61,7 +63,6 @@ def get_ticker_history(ticker, allow_sim):
 
 # --- 3. TOP SECTION: CONTROLS & LIVE LOOP ---
 
-# We move the toggle HERE so it is on the main screen
 c_toggle, c_blank = st.columns([1, 4])
 with c_toggle:
     show_sim = st.toggle("Include Simulation Data", value=True)
@@ -95,27 +96,24 @@ with col1:
     
     if st.button("🚀 Initiate Analysis"):
         st.session_state['analyzed_ticker'] = target_stock 
+        st.session_state['latest_live_data'] = None # Reset previous live data
         
-        # LIVE DATA FETCH
-        with st.spinner(f"Analyzing {target_stock}..."):
+        with st.spinner(f"Analyzing {target_stock} (This may take up to 30s)..."):
             try:
-                # FIX: Increased timeout to 30s to allow n8n to finish processing
                 res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=30)
                 
-                # --- UPDATED VALIDATION LOGIC ---
                 if res.status_code == 200:
                     try:
                         data = res.json()
-                        # Check if the JSON is valid (has a ticker)
                         if isinstance(data, list) and len(data) > 0: data = data[0]
                         
                         if data.get('ticker'): 
                             st.success("✅ Live Data Acquired.")
+                            # SAVE THE LIVE DATA TO SESSION STATE
+                            st.session_state['latest_live_data'] = data
                         else:
                             st.warning("⚠️ Live Feed Empty. Falling back to database.")
-                    
                     except ValueError:
-                        # This catches the HTML "Application Error" specifically
                         st.warning("⚠️ External Data Provider is undergoing maintenance. Displaying cached intelligence.")
                 else:
                     st.warning(f"⚠️ Live Feed Unstable ({res.status_code}). Using cached data.")
@@ -125,21 +123,30 @@ with col1:
 # --- DISPLAY RESULTS ---
 if st.session_state['analyzed_ticker']:
     ticker = st.session_state['analyzed_ticker']
+    live_data = st.session_state['latest_live_data']
     
-    # Fetch Data
+    # 1. Fetch History from DB
     hist_df = get_ticker_history(ticker, show_sim)
 
-    if not hist_df.empty:
-        hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
-        latest = hist_df.iloc[-1]
-        
+    # 2. Determine what to show for "Current Stats"
+    # Priority: Live Data > Database History > None
+    display_data = None
+    
+    if live_data:
+        display_data = live_data
+    elif not hist_df.empty:
+        # Convert DB row to dictionary format to match API
+        display_data = hist_df.iloc[-1].to_dict()
+
+    # 3. RENDER METRICS (If we have ANY data)
+    if display_data:
         # Metrics
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Ticker", ticker)
-        c2.metric("Reality (P/E)", latest['pe_ratio'])
-        c3.metric("Emotion (Hype)", f"{latest['hype_score']}%")
+        c2.metric("Reality (P/E)", display_data.get('pe_ratio', 0))
+        c3.metric("Emotion (Hype)", f"{display_data.get('hype_score', 0)}%")
         
-        gap = latest['gap_score']
+        gap = display_data.get('gap_score', 0)
         if gap > 50: color = "#ff4b4b"
         elif gap < 20: color = "#09ab3b"
         else: color = "#ffa500"
@@ -148,7 +155,17 @@ if st.session_state['analyzed_ticker']:
             st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
             st.metric("Strategic Gap", gap)
 
-        # Trend Chart
+        # News Banner
+        st.divider()
+        st.caption(f"📰 LATEST INTEL: {ticker}")
+        st.success(f"**Headline:** {display_data.get('top_news', 'No headline available.')}")
+
+    else:
+        st.error(f"❌ No data available for {ticker} (Live or Historical).")
+
+    # 4. RENDER CHART (Only if History Exists)
+    if not hist_df.empty:
+        hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
         st.divider()
         st.subheader("📈 Historical Trend Analysis")
         fig_hist = px.line(
@@ -158,21 +175,18 @@ if st.session_state['analyzed_ticker']:
         )
         st.plotly_chart(fig_hist, use_container_width=True)
         
-        # Trend Insight
+        # Insight Logic
         latest_gap = hist_df.iloc[-1]['gap_score']
         avg_gap = hist_df['gap_score'].mean()
         if latest_gap > avg_gap * 1.2:
             st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
         else:
             st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
-            
-        # News
+    
+    elif live_data:
+        # If we have live data but NO history (New Stock)
         st.divider()
-        st.caption(f"📰 LATEST INTEL: {ticker}")
-        st.success(f"**Headline:** {latest['top_news']}")
-        
+        st.info(f"ℹ️ **First Data Point Captured:** This is the first analysis for {ticker}. Trend lines will appear after subsequent runs.")
     else:
-        # HANDLING FOR NEW STOCKS (like NFLX)
-        st.divider()
-        st.error(f"❌ No historical data found for {ticker}.")
+        # Fallback for totally empty state
         st.info(f"💡 **Demo Tip:** Try **NVDA, TSLA, or AAPL** to see the Simulation Engine in action.")
