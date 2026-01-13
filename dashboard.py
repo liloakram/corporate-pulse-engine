@@ -23,7 +23,7 @@ with st.sidebar:
     * **<20:** Undervalued
     """)
     st.divider()
-    st.caption("v3.2 | Live Priority Mode")
+    st.caption("v3.3 | Live Priority Mode")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -140,20 +140,28 @@ if st.session_state['analyzed_ticker']:
 
     # 3. RENDER METRICS (If we have ANY data)
     if display_data:
+        # Get values safely
+        pe_value = display_data.get('pe_ratio', 0)
+        hype_value = display_data.get('hype_score', 0)
+        gap_value = display_data.get('gap_score', 0)
+
+        # Logic: If P/E is 0, show "N/A" to indicate missing data
+        pe_display = pe_value if pe_value > 0 else "N/A"
+
         # Metrics
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Ticker", ticker)
-        c2.metric("Reality (P/E)", display_data.get('pe_ratio', 0))
-        c3.metric("Emotion (Hype)", f"{display_data.get('hype_score', 0)}%")
+        c2.metric("Reality (P/E)", pe_display)
+        c3.metric("Emotion (Hype)", f"{hype_value}%")
         
-        gap = display_data.get('gap_score', 0)
-        if gap > 50: color = "#ff4b4b"
-        elif gap < 20: color = "#09ab3b"
+        # Color Logic for Gap
+        if gap_value > 50: color = "#ff4b4b"
+        elif gap_value < 20: color = "#09ab3b"
         else: color = "#ffa500"
         
         with c4:
             st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
-            st.metric("Strategic Gap", gap)
+            st.metric("Strategic Gap", gap_value)
 
         # News Banner
         st.divider()
