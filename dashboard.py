@@ -1,66 +1,122 @@
 import streamlit as st
+import pandas as pd
+import plotly.express as px
 import requests
+import json
+from supabase import create_client, Client
 
-st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
-st.title("📈 Corporate Pulse: Strategic Command Center")
+# --- 1. SETUP ---
+st.set_page_config(page_title="Hype vs Reality", layout="wide")
+st.title("⚡ The Corporate Pulse Engine")
 
-# --- Sidebar ---
-st.sidebar.header("Stock Intelligence")
-target_stock = st.sidebar.text_input("Enter Ticker", value="NVDA").upper()
+# Load Secrets (We know these work now!)
+supabase_url = st.secrets["SUPABASE_URL"]
+supabase_key = st.secrets["SUPABASE_KEY"]
+n8n_url = st.secrets["N8N_WEBHOOK_URL"]
+supabase: Client = create_client(supabase_url, supabase_key)
 
-N8N_WEBHOOK_URL = "https://liloakram.app.n8n.cloud/webhook/pulse-data"
+# --- 2. FUNCTIONS ---
 
-if st.sidebar.button('🚀 Run Analysis'):
-    with st.spinner(f'Analyzing {target_stock}...'):
+def get_db_data():
+    """Fetch the automated loop data from Supabase"""
+    # NO TRY/EXCEPT HERE -> If this fails, we want to see the error!
+    response = supabase.table('pulse_logs').select("*").order('created_at', desc=True).limit(50).execute()
+    df = pd.DataFrame(response.data)
+    
+    if df.empty:
+        return pd.DataFrame()
+        
+    # Convert numbers to floats
+    cols = ['pe_ratio', 'hype_score', 'gap_score']
+    for c in cols:
+        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    return df
+
+def trigger_n8n_analysis(ticker):
+    """Send ticker to n8n Webhook"""
+    try:
+        # 1. Send Request
+        response = requests.get(f"{n8n_url}?ticker={ticker}", timeout=20)
+        
+        # 2. Check Status
+        if response.status_code != 200:
+            return None, f"❌ n8n Error ({response.status_code}): {response.text}"
+            
+        # 3. Parse JSON
         try:
-            res = requests.get(N8N_WEBHOOK_URL, params={"ticker": target_stock})
-            if res.status_code == 200:
-                data = res.json()
-                gap = float(data.get('perceptionGap', 0))
-                
-                # 1. FIXED COLOR LOGIC
-                # High Risk (>50): Red
-                # Healthy (<20): Green
-                # Moderate (20-50): Neutral Gray
-                if gap > 50:
-                    color, msg, d_color = "#ff4b4b", "HIGH DIVERGENCE", "inverse"
-                elif gap < 20:
-                    color, msg, d_color = "#09ab3b", "HEALTHY SYNC", "normal"
-                else:
-                    color, msg, d_color = "#808080", "MODERATE GAP", "off"
+            data = response.json()
+        except json.JSONDecodeError:
+            return None, f"❌ Invalid JSON from n8n. Raw text: {response.text}"
 
-                # 2. Main Metrics Row
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Ticker", data.get('ticker'))
-                c2.metric("Reality (P/E)", data.get('peRatio'))
-                c3.metric("Emotion (Hype)", f"{data.get('hypeScore')}%")
-                
-                with c4:
-                    st.markdown(f"<style>div.st-key-gap [data-testid='stMetricValue'] {{ color: {color} !important; }}</style>", unsafe_allow_html=True)
-                    with st.container(key="gap"):
-                        st.metric("Strategic Gap", gap, delta=msg, delta_color=d_color)
-                
-                # 3. News Feed with FIXED BRACKET
-                st.divider()
-                st.subheader(f"📰 Intelligence Feed: {target_stock}")
-                news = data.get('topNews', [])
-                if news:
-                    for item in news:
-                        s = item['sentiment']
-                        # Remove any stray brackets and apply color tags
-                        clean_s = s.replace("]", "").replace("[", "")
-                        
-                        if "Bullish" in clean_s:
-                            label = f":green[{clean_s}]"
-                        elif "Bearish" in clean_s:
-                            label = f":red[{clean_s}]"
-                        else:
-                            label = clean_s # White/Neutral
-                            
-                        st.markdown(f"**{label}** ({item['impact']} Impact) | [{item['title']}]({item['url']})")
-                else:
-                    st.info(f"No headlines found for {target_stock} in the last 24 hours.")
-            else:
-                st.error("Engine Error: API Limit or Connection Failed.")
-        except Exception as e:
-            st.error(f"Sync Failed: {e}")
+        # 4. Handle Format (List vs Dict)
+        if isinstance(data, list) and len(data) > 0:
+            return data[0], None
+        elif isinstance(data, dict):
+            return data, None
+        else:
+            return None, "❌ n8n returned empty data."
+
+    except requests.exceptions.Timeout:
+        return None, "❌ Timeout: n8n took too long (>20s). Check if the workflow is Active."
+    except Exception as e:
+        return None, f"❌ Connection Error: {str(e)}"
+
+# --- 3. DASHBOARD LAYOUT ---
+
+# PART A: THE AUTOMATED LOOP
+st.subheader("📡 Live Market Loop")
+
+# Fetch Data
+df = get_db_data()
+
+if not df.empty:
+    # Clean duplicates to show only the latest snapshot per ticker
+    latest_df = df.sort_values('created_at').drop_duplicates('ticker', keep='last')
+    
+    # Filter out bad data (P/E 0)
+    clean_df = latest_df[latest_df['pe_ratio'] > 0].copy()
+    
+    if not clean_df.empty:
+        fig = px.scatter(
+            clean_df, x="pe_ratio", y="hype_score", size="gap_score", color="ticker", text="ticker",
+            title=f"Tracking {len(clean_df)} Active Stocks",
+            labels={"pe_ratio": "Reality (P/E)", "hype_score": "Hype (Sentiment)"},
+            size_max=60, height=500
+        )
+        # Add the 'Neutral' line
+        fig.add_shape(type="line", x0=0, y0=50, x1=1000, y1=50, line=dict(color="gray", dash="dot"))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Data found, but all P/E ratios are 0. (Market closed or bad data?)")
+else:
+    st.info("Database is empty. Waiting for n8n loop to run...")
+
+st.divider()
+
+# PART B: THE SEARCH BAR
+st.subheader("🔍 Deep Dive Analysis (via n8n)")
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    search_ticker = st.text_input("Enter Ticker (e.g. NFLX)", "").upper()
+    run_btn = st.button("Analyze Stock")
+
+if run_btn and search_ticker:
+    with st.spinner(f"Contacting n8n 'Fast Lane' for {search_ticker}..."):
+        data, error = trigger_n8n_analysis(search_ticker)
+        
+        if error:
+            st.error(error) # Show the error loudly!
+        else:
+            # Metrics
+            pe = data.get('pe_ratio', 0)
+            hype = data.get('hype_score', 0)
+            gap = data.get('gap_score', 0)
+            news = data.get('top_news', 'No news returned')
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Reality (P/E)", pe)
+            m2.metric("Hype Score", hype)
+            m3.metric("Gap Score", gap, delta_color="inverse")
+            
+            st.success(f"**Latest News:** {news}")
