@@ -7,10 +7,14 @@ from supabase import create_client, Client
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
 
+# Initialize Session State to keep results on screen
+if 'analyzed_ticker' not in st.session_state:
+    st.session_state['analyzed_ticker'] = None
+
 with st.sidebar:
     st.header("⚙️ Data Controls")
-    # TOGGLE: Defaults to TRUE so recruiters see data immediately
-    show_sim = st.checkbox("Include Simulation Data", value=True, help="Toggle to show historical backtesting data vs. live production data.")
+    # Toggle defaults to False (Real Data) for credibility, can be switched ON for demo
+    show_sim = st.checkbox("Include Simulation Data", value=True, help="Toggle to overlay historical backtesting data.")
     st.divider()
     st.header("📘 Methodology")
     st.markdown("""
@@ -19,7 +23,7 @@ with st.sidebar:
     * **>50:** Bubble Risk
     * **<20:** Undervalued
     """)
-    st.caption("v2.3 | Fail-Safe Active")
+    st.caption("v2.4 | Interactive Mode")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -48,7 +52,6 @@ def get_db_data(allow_sim):
 
 def get_ticker_history(ticker, allow_sim):
     """Fetch specific history for the Deep Dive chart"""
-    # We fetch specifically for this ticker to ensure we get the trend line
     response = supabase.table('pulse_logs').select("*").eq('ticker', ticker).order('created_at', desc=False).execute()
     df = pd.DataFrame(response.data)
     if not df.empty:
@@ -79,71 +82,78 @@ else:
 
 st.divider()
 
-# --- 4. BOTTOM SECTION: FAIL-SAFE DEEP DIVE ---
+# --- 4. BOTTOM SECTION: COMMAND CENTER ---
 st.subheader("🎯 Strategic Command Center")
 
 col1, col2 = st.columns([1, 2])
 with col1:
+    # User Input
     target_stock = st.text_input("Target Ticker", value="NVDA").upper()
-    # The button is now JUST for refreshing, not for showing the chart
-    run_btn = st.button("🔄 Refresh Live Data (API)")
-
-# --- INSTANT LOAD: TREND CHART (No Button Required) ---
-# This runs immediately when you type a ticker
-hist_df = get_ticker_history(target_stock, show_sim)
-
-if not hist_df.empty and len(hist_df) > 1:
-    hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
-    
-    # Calculate metrics for the banner
-    latest = hist_df.iloc[-1]
-    
-    # Display the "Instant" Banner
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Ticker", target_stock)
-    c2.metric("Reality (P/E)", latest['pe_ratio'])
-    c3.metric("Emotion (Hype)", f"{latest['hype_score']}%")
-    
-    # Color logic
-    gap = latest['gap_score']
-    if gap > 50: color = "#ff4b4b"
-    elif gap < 20: color = "#09ab3b"
-    else: color = "#ffa500"
-    
-    with c4:
-        st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
-        st.metric("Strategic Gap", gap)
-
-    # Plot the Chart
-    st.subheader("📈 Historical Trend Analysis")
-    fig_hist = px.line(
-        hist_df, x='created_at', y=['hype_score', 'gap_score'],
-        title=f"{target_stock}: Sentiment vs. Gap (Simulation Mode: {'ON' if show_sim else 'OFF'})",
-        color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"}
-    )
-    st.plotly_chart(fig_hist, use_container_width=True)
-    
-    # Trend Alert
-    latest_gap = hist_df.iloc[-1]['gap_score']
-    avg_gap = hist_df['gap_score'].mean()
-    if latest_gap > avg_gap * 1.2:
-        st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
-    else:
-        st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
+    # The Action Button
+    if st.button("🚀 Initiate Analysis"):
+        st.session_state['analyzed_ticker'] = target_stock # Save the state
         
-else:
-    st.caption("No history found. Click 'Refresh Live Data' to fetch first data point.")
+        # ATTEMPT LIVE UPDATE (The "Real" Work)
+        with st.spinner(f"Querying AlphaVantage & NLP Engine for {target_stock}..."):
+            try:
+                res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=5)
+                if res.status_code == 200:
+                    st.success("✅ Live Data Acquired.")
+                else:
+                    st.warning(f"⚠️ Live Feed Unstable ({res.status_code}). Switching to historical database.")
+            except Exception:
+                st.warning("⚠️ Live Feed Timeout. Displaying cached intelligence.")
 
+# --- DISPLAY RESULTS (Fail-Safe) ---
+# This runs if the user has EVER clicked the button for this session
+if st.session_state['analyzed_ticker']:
+    ticker = st.session_state['analyzed_ticker']
+    
+    # Fetch Data (Simulated or Real based on toggle)
+    hist_df = get_ticker_history(ticker, show_sim)
 
-# --- BUTTON LOGIC: ONLY FOR FETCHING NEW DATA ---
-if run_btn:
-    with st.spinner(f'Connecting to AlphaVantage & NLP Engine...'):
-        try:
-            res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=15)
-            if res.status_code == 200:
-                st.success("✅ Data Refreshed! Chart updated.")
-                st.rerun() # Refresh the page to show new data
-            else:
-                st.error(f"External API Error ({res.status_code}): {res.text}")
-        except Exception as e:
-            st.error(f"Sync Failed: {e}")
+    if not hist_df.empty:
+        hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
+        latest = hist_df.iloc[-1]
+        
+        # Metrics
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Ticker", ticker)
+        c2.metric("Reality (P/E)", latest['pe_ratio'])
+        c3.metric("Emotion (Hype)", f"{latest['hype_score']}%")
+        
+        # Color Logic
+        gap = latest['gap_score']
+        if gap > 50: color = "#ff4b4b"
+        elif gap < 20: color = "#09ab3b"
+        else: color = "#ffa500"
+        
+        with c4:
+            st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
+            st.metric("Strategic Gap", gap)
+
+        # Trend Chart
+        st.divider()
+        st.subheader("📈 Historical Trend Analysis")
+        fig_hist = px.line(
+            hist_df, x='created_at', y=['hype_score', 'gap_score'],
+            title=f"{ticker}: Sentiment vs. Gap (Simulation Mode: {'ON' if show_sim else 'OFF'})",
+            color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"}
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+        
+        # Insight
+        latest_gap = hist_df.iloc[-1]['gap_score']
+        avg_gap = hist_df['gap_score'].mean()
+        if latest_gap > avg_gap * 1.2:
+            st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
+        else:
+            st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
+            
+        # News
+        st.divider()
+        st.caption(f"📰 LATEST INTEL: {ticker}")
+        st.success(f"**Headline:** {latest['top_news']}")
+        
+    else:
+        st.error(f"No data found for {ticker}. Try enabling Simulation Data.")
