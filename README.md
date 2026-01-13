@@ -1,7 +1,7 @@
 # ⚡ The Corporate Pulse Engine
 ### Real-Time Market Sentiment & Valuation Divergence Tool
 
-**Live Dashboard:** [https://corporate-pulse-engine-l8zwo4qtsz9iezyeiqp83p.streamlit.app/]
+**Live Dashboard:** https://corporate-pulse-engine-l8zwo4qtsz9iezyeiqp83p.streamlit.app/
 
 ## 📊 Executive Summary
 In modern financial markets, asset prices are often driven by narrative ("Hype") rather than fundamentals ("Reality"). The **Corporate Pulse Engine** is a business intelligence tool designed to quantify this divergence in real-time.
@@ -26,5 +26,5 @@ For financial analysts and portfolio managers, this tool serves as an **Early Wa
 * *Scenario B:* High Sentiment + High P/E = **Speculative Bubble Risk**
 
 ---
-*Created by [Ali Ali]*
+*Created by Ali Ali*
 *Concentration: Business & Data Analytics*
