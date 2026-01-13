@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 from supabase import create_client, Client
+from datetime import datetime
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
@@ -13,17 +14,20 @@ if 'analyzed_ticker' not in st.session_state:
 if 'latest_live_data' not in st.session_state:
     st.session_state['latest_live_data'] = None
 
-# --- SIDEBAR: METHODOLOGY ONLY ---
+# --- SIDEBAR: METHODOLOGY ---
 with st.sidebar:
     st.header("📘 Methodology")
     st.markdown("""
     **The Gap Score Formula:**
     $$ Gap = | P/E - Hype | $$
-    * **>50:** Bubble Risk
-    * **<20:** Undervalued
+    
+    **Analyst Signals:**
+    * 🔴 **High Risk (>50):** Valuation decoupled from reality.
+    * 🟢 **Undervalued (<20):** Strong fundamentals, low hype.
+    * ⚪ **Speculative:** Negative earnings (P/E N/A).
     """)
     st.divider()
-    st.caption("v3.4 | Universal Data Parsing")
+    st.caption("v4.0 | Business Intelligence Suite")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -61,6 +65,23 @@ def get_ticker_history(ticker, allow_sim):
             df = df[~df['top_news'].astype(str).str.contains("SIMULATION", na=False)]
     return df
 
+def get_recommendation(gap, pe, hype):
+    """Business Logic Engine: Generates Prescriptive Analytics"""
+    # Logic based on [cite: 65, 66] - Handle insufficient data
+    if pe == 0 or pe == "N/A":
+        return "⚠️ SPECULATIVE HOLD", "Earnings are negative or missing. Market sentiment is driving price purely on speculation. High volatility expected.", "#808080"
+    
+    # Logic based on [cite: 59, 60] - Bubble Risk
+    if gap > 50:
+        return "🔴 REDUCE EXPOSURE", "The asset is effectively a bubble. Hype has completely detached from fundamental reality. Risk of correction is high.", "#ff4b4b"
+    
+    # Logic based on [cite: 61, 62] - Value Buy
+    if gap < 20:
+        return "🟢 VALUE OPPORTUNITY", "Fundamentals are strong relative to market sentiment. The asset may be overlooked or oversold.", "#09ab3b"
+    
+    # Logic based on [cite: 63, 64] - Hold
+    return "🟡 HOLD / NEUTRAL", "Valuation is consistent with market sentiment. No significant inefficiency detected.", "#ffa500"
+
 # --- 3. TOP SECTION: CONTROLS & LIVE LOOP ---
 
 c_toggle, c_blank = st.columns([1, 4])
@@ -96,11 +117,11 @@ with col1:
     
     if st.button("🚀 Initiate Analysis"):
         st.session_state['analyzed_ticker'] = target_stock 
-        st.session_state['latest_live_data'] = None # Reset previous live data
+        st.session_state['latest_live_data'] = None 
         
-        with st.spinner(f"Analyzing {target_stock} (This may take up to 30s)..."):
+        with st.spinner(f"Querying AlphaVantage & N8N Engine (Max 45s)..."):
             try:
-                res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=30)
+                res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=45)
                 
                 if res.status_code == 200:
                     try:
@@ -127,7 +148,7 @@ if st.session_state['analyzed_ticker']:
     # 1. Fetch History from DB
     hist_df = get_ticker_history(ticker, show_sim)
 
-    # 2. Determine "Current Stats"
+    # 2. Determine Data Source
     display_data = None
     if live_data:
         display_data = live_data
@@ -136,60 +157,78 @@ if st.session_state['analyzed_ticker']:
 
     # 3. RENDER METRICS
     if display_data:
-        # --- PRO DEBUGGER (Hidden by default) ---
+        # --- PRO DEBUGGER ---
         with st.expander("🕵️‍♂️ View Raw API Data (Debug)"):
             st.json(display_data)
 
-        # --- ROBUST DATA PARSING ---
-        # 1. Try to find the P/E Ratio using multiple common key names
+        # --- DATA PARSING ---
         raw_pe = display_data.get('pe_ratio')
-        if raw_pe is None:
-            raw_pe = display_data.get('PERatio') # Fallback for CamelCase
+        if raw_pe is None: raw_pe = display_data.get('PERatio')
         
-        # 2. Force-convert to float (Handles "15.5", "None", None, and 0)
         try:
             pe_value = float(raw_pe) if raw_pe is not None else 0.0
         except (ValueError, TypeError):
             pe_value = 0.0
             
-        # 3. Get Hype & Gap safely
-        try:
-            hype_value = float(display_data.get('hype_score', 0))
+        try: hype_value = float(display_data.get('hype_score', 0))
         except: hype_value = 0.0
             
-        try:
-            gap_value = float(display_data.get('gap_score', 0))
+        try: gap_value = float(display_data.get('gap_score', 0))
         except: gap_value = 0.0
 
-        # --- LOGIC: Handle Valid vs. Invalid P/E ---
+        # Logic: Valid vs Invalid P/E
         if pe_value > 0:
             pe_display = round(pe_value, 2)
-            
-            # Recalculate Gap if missing/zero (Safety Net)
-            if gap_value == 0:
-                gap_value = abs(pe_value - hype_value)
-            
+            if gap_value == 0: gap_value = abs(pe_value - hype_value)
             gap_display = round(gap_value, 2)
-            
-            # Color Logic
-            if gap_value > 50: color = "#ff4b4b"     # Red
-            elif gap_value < 20: color = "#09ab3b"   # Green
-            else: color = "#ffa500"                  # Orange
         else:
-            # If P/E is 0 or failed to parse
             pe_display = "N/A"
             gap_display = "N/A" 
-            color = "#808080" # Grey
+            pe_value = 0 # Ensure 0 for logic check
 
-        # Metrics
+        # --- THE RECOMMENDATION ENGINE (New!) ---
+        # This function call implements the business logic requested in [cite: 53]
+        rec_title, rec_desc, rec_color = get_recommendation(gap_value if gap_display != "N/A" else 0, pe_display, hype_value)
+
+        # Metrics Row
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Ticker", ticker)
         c2.metric("Reality (P/E)", pe_display)
         c3.metric("Emotion (Hype)", f"{hype_value}%")
-        
         with c4:
-            st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
+            st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {rec_color} !important; }}</style>""", unsafe_allow_html=True)
             st.metric("Strategic Gap", gap_display)
+
+        # --- RECOMMENDATION BOX ---
+        st.markdown(f"""
+        <div style="padding: 20px; border-radius: 10px; background-color: rgba(50, 50, 50, 0.2); border-left: 5px solid {rec_color}; margin-top: 20px;">
+            <h3 style="color: {rec_color}; margin:0;">{rec_title}</h3>
+            <p style="margin:0; font-size: 1.1em;">{rec_desc}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.write("") # Spacer
+
+        # --- CSV DOWNLOAD (New!) ---
+        # Implements the Managerial Hand-off requirement [cite: 75, 78]
+        export_df = pd.DataFrame([{
+            "Ticker": ticker,
+            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "PE_Ratio": pe_display,
+            "Hype_Score": hype_value,
+            "Gap_Score": gap_display,
+            "Recommendation": rec_title,
+            "Headline": display_data.get('top_news', 'N/A')
+        }])
+        
+        csv = export_df.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📥 Download Analyst Report (CSV)",
+            data=csv,
+            file_name=f"{ticker}_Pulse_Analysis.csv",
+            mime="text/csv",
+        )
 
         # News Banner
         st.divider()
@@ -210,13 +249,6 @@ if st.session_state['analyzed_ticker']:
             color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"}
         )
         st.plotly_chart(fig_hist, use_container_width=True)
-        
-        latest_gap = hist_df.iloc[-1]['gap_score']
-        avg_gap = hist_df['gap_score'].mean()
-        if latest_gap > avg_gap * 1.2:
-            st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
-        else:
-            st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
     
     elif live_data:
         st.divider()
