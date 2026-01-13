@@ -2,121 +2,148 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
-import json
 from supabase import create_client, Client
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="Hype vs Reality", layout="wide")
+# --- 1. CONFIGURATION & LAYOUT ---
+st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
+
+# --- SIDEBAR: METHODOLOGY (Business Admin Focus) ---
+with st.sidebar:
+    st.header("📘 Methodology")
+    st.markdown("""
+    **The Gap Score Formula:**
+    Quantifying the divergence between market reality and public perception.
+    
+    $$ Gap = | P/E - Hype | $$
+    
+    * **High Gap (>50):** Speculative Risk / Bubble.
+    * **Low Gap (<20):** Efficient Market Pricing.
+    
+    *Data Sources: AlphaVantage (Fundamentals) & News Sentiment Engine.*
+    """)
+    st.divider()
+    st.caption("v2.1 | Analytics Engine Active")
+
 st.title("⚡ The Corporate Pulse Engine")
 
-# Load Secrets (We know these work now!)
-supabase_url = st.secrets["SUPABASE_URL"]
-supabase_key = st.secrets["SUPABASE_KEY"]
-n8n_url = st.secrets["N8N_WEBHOOK_URL"]
-supabase: Client = create_client(supabase_url, supabase_key)
+# Load Secrets
+try:
+    supabase_url = st.secrets["SUPABASE_URL"]
+    supabase_key = st.secrets["SUPABASE_KEY"]
+    n8n_url = st.secrets["N8N_WEBHOOK_URL"]
+    supabase: Client = create_client(supabase_url, supabase_key)
+except Exception:
+    st.error("❌ Secrets missing! Please check Streamlit Cloud settings.")
+    st.stop()
 
 # --- 2. FUNCTIONS ---
 
 def get_db_data():
     """Fetch the automated loop data from Supabase"""
-    # NO TRY/EXCEPT HERE -> If this fails, we want to see the error!
     response = supabase.table('pulse_logs').select("*").order('created_at', desc=True).limit(50).execute()
     df = pd.DataFrame(response.data)
-    
-    if df.empty:
-        return pd.DataFrame()
-        
-    # Convert numbers to floats
-    cols = ['pe_ratio', 'hype_score', 'gap_score']
-    for c in cols:
-        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+    if not df.empty:
+        cols = ['pe_ratio', 'hype_score', 'gap_score']
+        for c in cols:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
     return df
 
-def trigger_n8n_analysis(ticker):
-    """Send ticker to n8n Webhook"""
-    try:
-        # 1. Send Request
-        response = requests.get(f"{n8n_url}?ticker={ticker}", timeout=20)
-        
-        # 2. Check Status
-        if response.status_code != 200:
-            return None, f"❌ n8n Error ({response.status_code}): {response.text}"
-            
-        # 3. Parse JSON
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            return None, f"❌ Invalid JSON from n8n. Raw text: {response.text}"
+# --- 3. TOP SECTION: LIVE MARKET LOOP (The Graph) ---
+st.subheader("📡 Live Market Intelligence")
 
-        # 4. Handle Format (List vs Dict)
-        if isinstance(data, list) and len(data) > 0:
-            return data[0], None
-        elif isinstance(data, dict):
-            return data, None
-        else:
-            return None, "❌ n8n returned empty data."
-
-    except requests.exceptions.Timeout:
-        return None, "❌ Timeout: n8n took too long (>20s). Check if the workflow is Active."
-    except Exception as e:
-        return None, f"❌ Connection Error: {str(e)}"
-
-# --- 3. DASHBOARD LAYOUT ---
-
-# PART A: THE AUTOMATED LOOP
-st.subheader("📡 Live Market Loop")
-
-# Fetch Data
 df = get_db_data()
-
 if not df.empty:
-    # Clean duplicates to show only the latest snapshot per ticker
     latest_df = df.sort_values('created_at').drop_duplicates('ticker', keep='last')
-    
-    # Filter out bad data (P/E 0)
     clean_df = latest_df[latest_df['pe_ratio'] > 0].copy()
     
     if not clean_df.empty:
         fig = px.scatter(
-            clean_df, x="pe_ratio", y="hype_score", size="gap_score", color="ticker", text="ticker",
-            title=f"Tracking {len(clean_df)} Active Stocks",
+            clean_df, x="pe_ratio", y="hype_score", size="gap_score", color="ticker",
+            title=f"Monitoring {len(clean_df)} Active Assets",
             labels={"pe_ratio": "Reality (P/E)", "hype_score": "Hype (Sentiment)"},
-            size_max=60, height=500
+            size_max=60, height=450
         )
-        # Add the 'Neutral' line
+        # Add a reference line for "Average Hype"
         fig.add_shape(type="line", x0=0, y0=50, x1=1000, y1=50, line=dict(color="gray", dash="dot"))
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("Data found, but all P/E ratios are 0. (Market closed or bad data?)")
 else:
-    st.info("Database is empty. Waiting for n8n loop to run...")
+    st.info("Initializing Database... Data will appear here shortly.")
 
 st.divider()
 
-# PART B: THE SEARCH BAR
-st.subheader("🔍 Deep Dive Analysis (via n8n)")
+# --- 4. BOTTOM SECTION: DEEP DIVE (The New Styling) ---
+st.subheader("🎯 Strategic Command Center")
+
 col1, col2 = st.columns([1, 2])
-
 with col1:
-    search_ticker = st.text_input("Enter Ticker (e.g. NFLX)", "").upper()
-    run_btn = st.button("Analyze Stock")
+    target_stock = st.text_input("Target Ticker", value="NVDA").upper()
+    run_btn = st.button("🚀 Initiate Analysis")
 
-if run_btn and search_ticker:
-    with st.spinner(f"Contacting n8n 'Fast Lane' for {search_ticker}..."):
-        data, error = trigger_n8n_analysis(search_ticker)
-        
-        if error:
-            st.error(error) # Show the error loudly!
-        else:
-            # Metrics
-            pe = data.get('pe_ratio', 0)
-            hype = data.get('hype_score', 0)
-            gap = data.get('gap_score', 0)
-            news = data.get('top_news', 'No news returned')
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Reality (P/E)", pe)
-            m2.metric("Hype Score", hype)
-            m3.metric("Gap Score", gap, delta_color="inverse")
+if run_btn:
+    with st.spinner(f'Deciphering signal for {target_stock}...'):
+        try:
+            # Call n8n
+            res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=15)
             
-            st.success(f"**Latest News:** {news}")
+            if res.status_code == 200:
+                data = res.json()
+                
+                # FIX: Map n8n keys (snake_case) to Code variables
+                if isinstance(data, list) and len(data) > 0:
+                    data = data[0]
+                
+                # Safely get values with defaults
+                gap = float(data.get('gap_score', 0))
+                pe = data.get('pe_ratio', 0)
+                hype = data.get('hype_score', 0)
+                ticker = data.get('ticker', target_stock)
+                news_text = data.get('top_news', "No recent headlines found.")
+
+                # 1. LOGIC: Color Coding the Gap
+                if gap > 50:
+                    color, msg, d_color = "#ff4b4b", "HIGH DIVERGENCE (Risk)", "inverse"
+                elif gap < 20:
+                    color, msg, d_color = "#09ab3b", "HEALTHY SYNC", "normal"
+                else:
+                    color, msg, d_color = "#ffa500", "MODERATE GAP", "off"
+
+                # 2. UI: Display Metrics
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Ticker", ticker)
+                c2.metric("Reality (P/E)", pe)
+                c3.metric("Emotion (Hype)", f"{hype}%")
+                
+                with c4:
+                    st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
+                    st.metric("Strategic Gap", gap, delta=msg, delta_color=d_color)
+
+                # 3. ANALYTICS UPGRADE: Trend Analysis
+                st.divider()
+                st.subheader("📈 Historical Trend Analysis")
+                
+                # Fetch history for this specific ticker
+                history_response = supabase.table('pulse_logs')\
+                    .select("*")\
+                    .eq('ticker', ticker)\
+                    .order('created_at', desc=False)\
+                    .execute()
+                
+                hist_df = pd.DataFrame(history_response.data)
+                
+                if not hist_df.empty and len(hist_df) > 1:
+                    # clean dates
+                    hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
+                    
+                    # Create a dual-line chart
+                    fig_hist = px.line(
+                        hist_df, 
+                        x='created_at', 
+                        y=['hype_score', 'gap_score'],
+                        title=f"{ticker}: Sentiment vs. Strategic Gap Over Time",
+                        labels={"value": "Score (0-100)", "created_at": "Time", "variable": "Metric"},
+                        color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"} # Blue & Red
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                    
+                    # Business Insight Logic
+                    latest_gap = hist_df.iloc[-
