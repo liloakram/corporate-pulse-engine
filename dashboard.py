@@ -128,25 +128,34 @@ if st.session_state['analyzed_ticker']:
     # 1. Fetch History from DB
     hist_df = get_ticker_history(ticker, show_sim)
 
-    # 2. Determine what to show for "Current Stats"
-    # Priority: Live Data > Database History > None
+    # 2. Determine "Current Stats"
     display_data = None
-    
     if live_data:
         display_data = live_data
     elif not hist_df.empty:
-        # Convert DB row to dictionary format to match API
         display_data = hist_df.iloc[-1].to_dict()
 
-    # 3. RENDER METRICS (If we have ANY data)
+    # 3. RENDER METRICS
     if display_data:
         # Get values safely
         pe_value = display_data.get('pe_ratio', 0)
         hype_value = display_data.get('hype_score', 0)
         gap_value = display_data.get('gap_score', 0)
 
-        # Logic: If P/E is 0, show "N/A" to indicate missing data
-        pe_display = pe_value if pe_value > 0 else "N/A"
+        # LOGIC FIX: Handle Missing P/E
+        if pe_value > 0:
+            pe_display = pe_value
+            gap_display = gap_value
+            
+            # Color Logic for Gap
+            if gap_value > 50: color = "#ff4b4b"     # Red
+            elif gap_value < 20: color = "#09ab3b"   # Green
+            else: color = "#ffa500"                  # Orange
+        else:
+            # If P/E is 0/Missing, the Gap is mathematically invalid
+            pe_display = "N/A"
+            gap_display = "N/A" 
+            color = "#808080" # Grey for N/A
 
         # Metrics
         c1, c2, c3, c4 = st.columns(4)
@@ -154,14 +163,9 @@ if st.session_state['analyzed_ticker']:
         c2.metric("Reality (P/E)", pe_display)
         c3.metric("Emotion (Hype)", f"{hype_value}%")
         
-        # Color Logic for Gap
-        if gap_value > 50: color = "#ff4b4b"
-        elif gap_value < 20: color = "#09ab3b"
-        else: color = "#ffa500"
-        
         with c4:
             st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
-            st.metric("Strategic Gap", gap_value)
+            st.metric("Strategic Gap", gap_display)
 
         # News Banner
         st.divider()
@@ -169,9 +173,9 @@ if st.session_state['analyzed_ticker']:
         st.success(f"**Headline:** {display_data.get('top_news', 'No headline available.')}")
 
     else:
-        st.error(f"❌ No data available for {ticker} (Live or Historical).")
+        st.error(f"❌ No data available for {ticker}.")
 
-    # 4. RENDER CHART (Only if History Exists)
+    # 4. RENDER CHART
     if not hist_df.empty:
         hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
         st.divider()
@@ -183,7 +187,6 @@ if st.session_state['analyzed_ticker']:
         )
         st.plotly_chart(fig_hist, use_container_width=True)
         
-        # Insight Logic
         latest_gap = hist_df.iloc[-1]['gap_score']
         avg_gap = hist_df['gap_score'].mean()
         if latest_gap > avg_gap * 1.2:
@@ -192,9 +195,7 @@ if st.session_state['analyzed_ticker']:
             st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
     
     elif live_data:
-        # If we have live data but NO history (New Stock)
         st.divider()
         st.info(f"ℹ️ **First Data Point Captured:** This is the first analysis for {ticker}. Trend lines will appear after subsequent runs.")
     else:
-        # Fallback for totally empty state
         st.info(f"💡 **Demo Tip:** Try **NVDA, TSLA, or AAPL** to see the Simulation Engine in action.")
