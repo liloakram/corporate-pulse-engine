@@ -4,24 +4,22 @@ import plotly.express as px
 import requests
 from supabase import create_client, Client
 
-# --- 1. CONFIGURATION & LAYOUT ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
 
-# --- SIDEBAR: CONTROLS & METHODOLOGY ---
 with st.sidebar:
     st.header("⚙️ Data Controls")
-    # THE TOGGLE: Checked = Show Demo Data, Unchecked = Real Data Only
+    # TOGGLE: Defaults to TRUE so recruiters see data immediately
     show_sim = st.checkbox("Include Simulation Data", value=True, help="Toggle to show historical backtesting data vs. live production data.")
-    
     st.divider()
     st.header("📘 Methodology")
     st.markdown("""
     **The Gap Score Formula:**
     $$ Gap = | P/E - Hype | $$
-    * **High Gap (>50):** Speculative Risk.
-    * **Low Gap (<20):** Efficient Pricing.
+    * **>50:** Bubble Risk
+    * **<20:** Undervalued
     """)
-    st.caption("v2.2 | Analytics Engine Active")
+    st.caption("v2.3 | Fail-Safe Active")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -32,38 +30,41 @@ try:
     n8n_url = st.secrets["N8N_WEBHOOK_URL"]
     supabase: Client = create_client(supabase_url, supabase_key)
 except Exception:
-    st.error("❌ Secrets missing! Please check Streamlit Cloud settings.")
+    st.error("❌ Secrets missing!")
     st.stop()
 
 # --- 2. FUNCTIONS ---
 
 def get_db_data(allow_sim):
-    """Fetch data and filter based on the toggle"""
-    # We fetch more rows (200) to ensure we have enough history to show
+    """Fetch global data for the scatter plot"""
     response = supabase.table('pulse_logs').select("*").order('created_at', desc=True).limit(200).execute()
     df = pd.DataFrame(response.data)
-    
     if not df.empty:
-        # Convert numbers
         cols = ['pe_ratio', 'hype_score', 'gap_score']
-        for c in cols:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-            
-        # FILTER LOGIC: If checkbox is OFF, hide rows with [SIMULATION] tag
+        for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         if not allow_sim:
             df = df[~df['top_news'].astype(str).str.contains("SIMULATION", na=False)]
-            
+    return df
+
+def get_ticker_history(ticker, allow_sim):
+    """Fetch specific history for the Deep Dive chart"""
+    # We fetch specifically for this ticker to ensure we get the trend line
+    response = supabase.table('pulse_logs').select("*").eq('ticker', ticker).order('created_at', desc=False).execute()
+    df = pd.DataFrame(response.data)
+    if not df.empty:
+        cols = ['pe_ratio', 'hype_score', 'gap_score']
+        for c in cols: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        if not allow_sim:
+            df = df[~df['top_news'].astype(str).str.contains("SIMULATION", na=False)]
     return df
 
 # --- 3. TOP SECTION: LIVE MARKET LOOP ---
 st.subheader("📡 Live Market Intelligence")
+global_df = get_db_data(show_sim)
 
-df = get_db_data(show_sim)
-
-if not df.empty:
-    latest_df = df.sort_values('created_at').drop_duplicates('ticker', keep='last')
+if not global_df.empty:
+    latest_df = global_df.sort_values('created_at').drop_duplicates('ticker', keep='last')
     clean_df = latest_df[latest_df['pe_ratio'] > 0].copy()
-    
     if not clean_df.empty:
         fig = px.scatter(
             clean_df, x="pe_ratio", y="hype_score", size="gap_score", color="ticker",
@@ -73,82 +74,76 @@ if not df.empty:
         )
         fig.add_shape(type="line", x0=0, y0=50, x1=1000, y1=50, line=dict(color="gray", dash="dot"))
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No data found for current filter.")
 else:
-    st.info("Database empty. Try enabling Simulation Data.")
+    st.info("Database empty. Enable Simulation Data to see demo.")
 
 st.divider()
 
-# --- 4. BOTTOM SECTION: DEEP DIVE ---
+# --- 4. BOTTOM SECTION: FAIL-SAFE DEEP DIVE ---
 st.subheader("🎯 Strategic Command Center")
 
 col1, col2 = st.columns([1, 2])
 with col1:
     target_stock = st.text_input("Target Ticker", value="NVDA").upper()
-    run_btn = st.button("🚀 Initiate Analysis")
+    # The button is now JUST for refreshing, not for showing the chart
+    run_btn = st.button("🔄 Refresh Live Data (API)")
 
+# --- INSTANT LOAD: TREND CHART (No Button Required) ---
+# This runs immediately when you type a ticker
+hist_df = get_ticker_history(target_stock, show_sim)
+
+if not hist_df.empty and len(hist_df) > 1:
+    hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
+    
+    # Calculate metrics for the banner
+    latest = hist_df.iloc[-1]
+    
+    # Display the "Instant" Banner
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ticker", target_stock)
+    c2.metric("Reality (P/E)", latest['pe_ratio'])
+    c3.metric("Emotion (Hype)", f"{latest['hype_score']}%")
+    
+    # Color logic
+    gap = latest['gap_score']
+    if gap > 50: color = "#ff4b4b"
+    elif gap < 20: color = "#09ab3b"
+    else: color = "#ffa500"
+    
+    with c4:
+        st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
+        st.metric("Strategic Gap", gap)
+
+    # Plot the Chart
+    st.subheader("📈 Historical Trend Analysis")
+    fig_hist = px.line(
+        hist_df, x='created_at', y=['hype_score', 'gap_score'],
+        title=f"{target_stock}: Sentiment vs. Gap (Simulation Mode: {'ON' if show_sim else 'OFF'})",
+        color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"}
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+    
+    # Trend Alert
+    latest_gap = hist_df.iloc[-1]['gap_score']
+    avg_gap = hist_df['gap_score'].mean()
+    if latest_gap > avg_gap * 1.2:
+        st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
+    else:
+        st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
+        
+else:
+    st.caption("No history found. Click 'Refresh Live Data' to fetch first data point.")
+
+
+# --- BUTTON LOGIC: ONLY FOR FETCHING NEW DATA ---
 if run_btn:
-    with st.spinner(f'Deciphering signal for {target_stock}...'):
+    with st.spinner(f'Connecting to AlphaVantage & NLP Engine...'):
         try:
-            # Call n8n
             res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=15)
-            
             if res.status_code == 200:
-                data = res.json()
-                if isinstance(data, list) and len(data) > 0: data = data[0]
-                
-                # Variables
-                gap = float(data.get('gap_score', 0))
-                pe = data.get('pe_ratio', 0)
-                hype = data.get('hype_score', 0)
-                ticker = data.get('ticker', target_stock)
-                news_text = data.get('top_news', "No recent headlines.")
-
-                # Colors
-                if gap > 50: color, msg, d_color = "#ff4b4b", "HIGH DIVERGENCE", "inverse"
-                elif gap < 20: color, msg, d_color = "#09ab3b", "HEALTHY SYNC", "normal"
-                else: color, msg, d_color = "#ffa500", "MODERATE GAP", "off"
-
-                # Metrics
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Ticker", ticker)
-                c2.metric("Reality (P/E)", pe)
-                c3.metric("Emotion (Hype)", f"{hype}%")
-                with c4:
-                    st.markdown(f"""<style>div[data-testid="stMetricValue"] {{ color: {color} !important; }}</style>""", unsafe_allow_html=True)
-                    st.metric("Strategic Gap", gap, delta=msg, delta_color=d_color)
-
-                # --- TREND CHART (Uses the Toggle) ---
-                st.divider()
-                st.subheader("📈 Historical Trend Analysis")
-                
-                # Filter the HISTORY based on the toggle as well
-                hist_df = df[df['ticker'] == ticker].sort_values('created_at')
-                
-                if not hist_df.empty and len(hist_df) > 1:
-                    hist_df['created_at'] = pd.to_datetime(hist_df['created_at'])
-                    
-                    fig_hist = px.line(
-                        hist_df, x='created_at', y=['hype_score', 'gap_score'],
-                        title=f"{ticker}: Sentiment vs. Gap (Simulation Mode: {'ON' if show_sim else 'OFF'})",
-                        color_discrete_map={"hype_score": "#3498db", "gap_score": "#e74c3c"}
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-                    
-                    # Trend Insight
-                    latest_gap = hist_df.iloc[-1]['gap_score']
-                    avg_gap = hist_df['gap_score'].mean()
-                    if latest_gap > avg_gap * 1.2:
-                         st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is **20% higher** than average.")
-                    else:
-                         st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
-                else:
-                    st.caption("Not enough data points for a trend line yet.")
-
-                st.success(f"**Latest Headline:** {news_text}")
-
+                st.success("✅ Data Refreshed! Chart updated.")
+                st.rerun() # Refresh the page to show new data
             else:
-                st.error(f"Engine Error: {res.status_code}")
+                st.error(f"External API Error ({res.status_code}): {res.text}")
         except Exception as e:
             st.error(f"Sync Failed: {e}")
