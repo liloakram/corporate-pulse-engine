@@ -27,7 +27,7 @@ with st.sidebar:
     * ⚪ **Speculative:** Negative earnings (P/E N/A).
     """)
     st.divider()
-    st.caption("v4.0 | Business Intelligence Suite")
+    st.caption("v4.1 | Business Intelligence Suite")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -157,9 +157,9 @@ if st.session_state['analyzed_ticker']:
 
     # 3. RENDER METRICS
     if display_data:
-        # --- PRO DEBUGGER ---
-        with st.expander("🕵️‍♂️ View Raw API Data (Debug)"):
-            st.json(display_data)
+        # --- (REMOVED DEBUGGER FOR FINAL POLISH) ---
+        # with st.expander("🕵️‍♂️ View Raw API Data (Debug)"):
+        #     st.json(display_data)
 
         # --- DATA PARSING ---
         raw_pe = display_data.get('pe_ratio')
@@ -184,10 +184,9 @@ if st.session_state['analyzed_ticker']:
         else:
             pe_display = "N/A"
             gap_display = "N/A" 
-            pe_value = 0 # Ensure 0 for logic check
+            pe_value = 0 
 
-        # --- THE RECOMMENDATION ENGINE (New!) ---
-        # This function call implements the business logic requested in [cite: 53]
+        # --- RECOMMENDATION ENGINE ---
         rec_title, rec_desc, rec_color = get_recommendation(gap_value if gap_display != "N/A" else 0, pe_display, hype_value)
 
         # Metrics Row
@@ -207,27 +206,36 @@ if st.session_state['analyzed_ticker']:
         </div>
         """, unsafe_allow_html=True)
         
-        st.write("") # Spacer
+        st.write("") 
 
-        # --- CSV DOWNLOAD (New!) ---
-        # Implements the Managerial Hand-off requirement [cite: 75, 78]
-        export_df = pd.DataFrame([{
-            "Ticker": ticker,
-            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "PE_Ratio": pe_display,
-            "Hype_Score": hype_value,
-            "Gap_Score": gap_display,
-            "Recommendation": rec_title,
-            "Headline": display_data.get('top_news', 'N/A')
+        # --- CSV DOWNLOAD UPGRADE (FULL HISTORY) ---
+        # Create a mini dataframe for the CURRENT live row
+        current_row = pd.DataFrame([{
+            "ticker": ticker,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "pe_ratio": pe_display,
+            "hype_score": hype_value,
+            "gap_score": gap_display,
+            "top_news": display_data.get('top_news', 'N/A')
         }])
         
-        csv = export_df.to_csv(index=False).encode('utf-8')
+        # Merge with history if it exists
+        if not hist_df.empty:
+            # We filter history to match the export columns
+            hist_export = hist_df[['ticker', 'created_at', 'pe_ratio', 'hype_score', 'gap_score', 'top_news']]
+            # Combine Live + History
+            full_export = pd.concat([current_row, hist_export], ignore_index=True)
+        else:
+            full_export = current_row
+            
+        csv = full_export.to_csv(index=False).encode('utf-8')
         
         st.download_button(
-            label="📥 Download Analyst Report (CSV)",
+            label="📥 Download Full Trend Report (CSV)",
             data=csv,
-            file_name=f"{ticker}_Pulse_Analysis.csv",
+            file_name=f"{ticker}_Pulse_Analysis_Full.csv",
             mime="text/csv",
+            help="Downloads the complete historical dataset for this ticker + current analysis."
         )
 
         # News Banner
