@@ -21,7 +21,7 @@ with st.sidebar:
     * **<20:** Undervalued
     """)
     st.divider()
-    st.caption("v3.0 | Portfolio Edition")
+    st.caption("v3.1 | Portfolio Edition")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -99,7 +99,8 @@ with col1:
         # LIVE DATA FETCH
         with st.spinner(f"Analyzing {target_stock}..."):
             try:
-                res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=5)
+                # FIX: Increased timeout to 30s to allow n8n to finish processing
+                res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=30)
                 
                 # --- UPDATED VALIDATION LOGIC ---
                 if res.status_code == 200:
