@@ -101,16 +101,21 @@ with col1:
             try:
                 res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=5)
                 
-                # VALIDATION LOGIC: Check if we actually got data
+                # --- UPDATED VALIDATION LOGIC ---
                 if res.status_code == 200:
-                    data = res.json()
-                    # Check if the JSON is valid (has a ticker)
-                    if isinstance(data, list) and len(data) > 0: data = data[0]
+                    try:
+                        data = res.json()
+                        # Check if the JSON is valid (has a ticker)
+                        if isinstance(data, list) and len(data) > 0: data = data[0]
+                        
+                        if data.get('ticker'): 
+                            st.success("✅ Live Data Acquired.")
+                        else:
+                            st.warning("⚠️ Live Feed Empty. Falling back to database.")
                     
-                    if data.get('ticker'): 
-                        st.success("✅ Live Data Acquired.")
-                    else:
-                        st.warning("⚠️ Live Feed Empty. Falling back to database.")
+                    except ValueError:
+                        # This catches the HTML "Application Error" specifically
+                        st.warning("⚠️ External Data Provider is undergoing maintenance. Displaying cached intelligence.")
                 else:
                     st.warning(f"⚠️ Live Feed Unstable ({res.status_code}). Using cached data.")
             except Exception:
