@@ -7,15 +7,12 @@ from supabase import create_client, Client
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Corporate Pulse Command Center", layout="wide")
 
-# Initialize Session State to keep results on screen
+# Initialize Session State
 if 'analyzed_ticker' not in st.session_state:
     st.session_state['analyzed_ticker'] = None
 
+# --- SIDEBAR: METHODOLOGY ONLY ---
 with st.sidebar:
-    st.header("⚙️ Data Controls")
-    # Toggle defaults to False (Real Data) for credibility, can be switched ON for demo
-    show_sim = st.checkbox("Include Simulation Data", value=True, help="Toggle to overlay historical backtesting data.")
-    st.divider()
     st.header("📘 Methodology")
     st.markdown("""
     **The Gap Score Formula:**
@@ -23,7 +20,8 @@ with st.sidebar:
     * **>50:** Bubble Risk
     * **<20:** Undervalued
     """)
-    st.caption("v2.4 | Interactive Mode")
+    st.divider()
+    st.caption("v3.0 | Portfolio Edition")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -61,7 +59,13 @@ def get_ticker_history(ticker, allow_sim):
             df = df[~df['top_news'].astype(str).str.contains("SIMULATION", na=False)]
     return df
 
-# --- 3. TOP SECTION: LIVE MARKET LOOP ---
+# --- 3. TOP SECTION: CONTROLS & LIVE LOOP ---
+
+# We move the toggle HERE so it is on the main screen
+c_toggle, c_blank = st.columns([1, 4])
+with c_toggle:
+    show_sim = st.toggle("Include Simulation Data", value=True)
+
 st.subheader("📡 Live Market Intelligence")
 global_df = get_db_data(show_sim)
 
@@ -78,7 +82,7 @@ if not global_df.empty:
         fig.add_shape(type="line", x0=0, y0=50, x1=1000, y1=50, line=dict(color="gray", dash="dot"))
         st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Database empty. Enable Simulation Data to see demo.")
+    st.info("Database empty. Toggle 'Include Simulation Data' to see demo.")
 
 st.divider()
 
@@ -87,29 +91,36 @@ st.subheader("🎯 Strategic Command Center")
 
 col1, col2 = st.columns([1, 2])
 with col1:
-    # User Input
     target_stock = st.text_input("Target Ticker", value="NVDA").upper()
-    # The Action Button
+    
     if st.button("🚀 Initiate Analysis"):
-        st.session_state['analyzed_ticker'] = target_stock # Save the state
+        st.session_state['analyzed_ticker'] = target_stock 
         
-        # ATTEMPT LIVE UPDATE (The "Real" Work)
-        with st.spinner(f"Querying AlphaVantage & NLP Engine for {target_stock}..."):
+        # LIVE DATA FETCH
+        with st.spinner(f"Analyzing {target_stock}..."):
             try:
                 res = requests.get(n8n_url, params={"ticker": target_stock}, timeout=5)
+                
+                # VALIDATION LOGIC: Check if we actually got data
                 if res.status_code == 200:
-                    st.success("✅ Live Data Acquired.")
+                    data = res.json()
+                    # Check if the JSON is valid (has a ticker)
+                    if isinstance(data, list) and len(data) > 0: data = data[0]
+                    
+                    if data.get('ticker'): 
+                        st.success("✅ Live Data Acquired.")
+                    else:
+                        st.warning("⚠️ Live Feed Empty. Falling back to database.")
                 else:
-                    st.warning(f"⚠️ Live Feed Unstable ({res.status_code}). Switching to historical database.")
+                    st.warning(f"⚠️ Live Feed Unstable ({res.status_code}). Using cached data.")
             except Exception:
                 st.warning("⚠️ Live Feed Timeout. Displaying cached intelligence.")
 
-# --- DISPLAY RESULTS (Fail-Safe) ---
-# This runs if the user has EVER clicked the button for this session
+# --- DISPLAY RESULTS ---
 if st.session_state['analyzed_ticker']:
     ticker = st.session_state['analyzed_ticker']
     
-    # Fetch Data (Simulated or Real based on toggle)
+    # Fetch Data
     hist_df = get_ticker_history(ticker, show_sim)
 
     if not hist_df.empty:
@@ -122,7 +133,6 @@ if st.session_state['analyzed_ticker']:
         c2.metric("Reality (P/E)", latest['pe_ratio'])
         c3.metric("Emotion (Hype)", f"{latest['hype_score']}%")
         
-        # Color Logic
         gap = latest['gap_score']
         if gap > 50: color = "#ff4b4b"
         elif gap < 20: color = "#09ab3b"
@@ -142,7 +152,7 @@ if st.session_state['analyzed_ticker']:
         )
         st.plotly_chart(fig_hist, use_container_width=True)
         
-        # Insight
+        # Trend Insight
         latest_gap = hist_df.iloc[-1]['gap_score']
         avg_gap = hist_df['gap_score'].mean()
         if latest_gap > avg_gap * 1.2:
@@ -156,4 +166,7 @@ if st.session_state['analyzed_ticker']:
         st.success(f"**Headline:** {latest['top_news']}")
         
     else:
-        st.error(f"No data found for {ticker}. Try enabling Simulation Data.")
+        # HANDLING FOR NEW STOCKS (like NFLX)
+        st.divider()
+        st.error(f"❌ No historical data found for {ticker}.")
+        st.info(f"💡 **Demo Tip:** Try **NVDA, TSLA, or AAPL** to see the Simulation Engine in action.")
