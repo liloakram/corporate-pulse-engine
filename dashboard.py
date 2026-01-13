@@ -23,7 +23,7 @@ with st.sidebar:
     * **<20:** Undervalued
     """)
     st.divider()
-    st.caption("v3.3 | Live Priority Mode")
+    st.caption("v3.4 | Universal Data Parsing")
 
 st.title("⚡ The Corporate Pulse Engine")
 
@@ -109,7 +109,6 @@ with col1:
                         
                         if data.get('ticker'): 
                             st.success("✅ Live Data Acquired.")
-                            # SAVE THE LIVE DATA TO SESSION STATE
                             st.session_state['latest_live_data'] = data
                         else:
                             st.warning("⚠️ Live Feed Empty. Falling back to database.")
@@ -137,25 +136,50 @@ if st.session_state['analyzed_ticker']:
 
     # 3. RENDER METRICS
     if display_data:
-        # Get values safely
-        pe_value = display_data.get('pe_ratio', 0)
-        hype_value = display_data.get('hype_score', 0)
-        gap_value = display_data.get('gap_score', 0)
+        # --- PRO DEBUGGER (Hidden by default) ---
+        with st.expander("🕵️‍♂️ View Raw API Data (Debug)"):
+            st.json(display_data)
 
-        # LOGIC FIX: Handle Missing P/E
-        if pe_value > 0:
-            pe_display = pe_value
-            gap_display = gap_value
+        # --- ROBUST DATA PARSING ---
+        # 1. Try to find the P/E Ratio using multiple common key names
+        raw_pe = display_data.get('pe_ratio')
+        if raw_pe is None:
+            raw_pe = display_data.get('PERatio') # Fallback for CamelCase
+        
+        # 2. Force-convert to float (Handles "15.5", "None", None, and 0)
+        try:
+            pe_value = float(raw_pe) if raw_pe is not None else 0.0
+        except (ValueError, TypeError):
+            pe_value = 0.0
             
-            # Color Logic for Gap
+        # 3. Get Hype & Gap safely
+        try:
+            hype_value = float(display_data.get('hype_score', 0))
+        except: hype_value = 0.0
+            
+        try:
+            gap_value = float(display_data.get('gap_score', 0))
+        except: gap_value = 0.0
+
+        # --- LOGIC: Handle Valid vs. Invalid P/E ---
+        if pe_value > 0:
+            pe_display = round(pe_value, 2)
+            
+            # Recalculate Gap if missing/zero (Safety Net)
+            if gap_value == 0:
+                gap_value = abs(pe_value - hype_value)
+            
+            gap_display = round(gap_value, 2)
+            
+            # Color Logic
             if gap_value > 50: color = "#ff4b4b"     # Red
             elif gap_value < 20: color = "#09ab3b"   # Green
             else: color = "#ffa500"                  # Orange
         else:
-            # If P/E is 0/Missing, the Gap is mathematically invalid
+            # If P/E is 0 or failed to parse
             pe_display = "N/A"
             gap_display = "N/A" 
-            color = "#808080" # Grey for N/A
+            color = "#808080" # Grey
 
         # Metrics
         c1, c2, c3, c4 = st.columns(4)
