@@ -146,4 +146,24 @@ if run_btn:
                     st.plotly_chart(fig_hist, use_container_width=True)
                     
                     # Business Insight Logic
-                    latest_gap = hist_df.iloc[-
+                    latest_gap = hist_df.iloc[-1]['gap_score']
+                    avg_gap = hist_df['gap_score'].mean()
+                    
+                    if latest_gap > avg_gap * 1.2:
+                         st.warning(f"⚠️ **Trend Alert:** The Strategic Gap is currently **20% higher** than its historical average. Volatility expected.")
+                    else:
+                         st.info(f"✅ **Trend Stability:** The Gap is consistent with historical averages.")
+                         
+                else:
+                    st.caption("Not enough historical data yet. Keep searching to build the trendline!")
+
+                # 4. UI: News Feed
+                st.divider()
+                st.caption(f"📰 INTELLIGENCE BRIEF: {ticker}")
+                st.success(f"**Latest Headline:** {news_text}")
+
+            else:
+                st.error(f"Engine Error ({res.status_code}): {res.text}")
+                
+        except Exception as e:
+            st.error(f"Sync Failed: {e}")
