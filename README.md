@@ -1,3 +1,29 @@
+graph TD
+    %% Nodes
+    subgraph Ingestion_Layer ["Ingestion Layer (Python & n8n)"]
+        A[Python Scripts<br/>yFinance Batch Loader] -->|Raw Data| D[Supabase DB]
+        B[n8n Webhook<br/>Live News Scraper] -->|Sentiment Data| D
+    end
+
+    subgraph Storage_Layer ["Storage Layer (Supabase PostgreSQL)"]
+        D[(pulse_logs<br/>Raw Data Table)]
+        D --> E[executive_report<br/>SQL View]
+    end
+
+    subgraph Application_Layer ["Application & Presentation Layer"]
+        E -->|Read Optimized| F[Looker Studio<br/>Executive Dashboard]
+        D -->|Server-Side Filter| G[Streamlit App<br/>Analyst Command Center]
+    end
+
+    %% Styles
+    classDef ingestion fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef app fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+
+    class A,B ingestion;
+    class D,E storage;
+    class F,G app;
+
 # ⚡ The Corporate Pulse Engine
 ### Real-Time Market Sentiment & Valuation Divergence Tool
 
